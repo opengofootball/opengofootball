@@ -120,6 +120,11 @@ Stadium (Main.tscn)
   player/camera; `get_goal_position(team)` returns `Vector3.ZERO` (no goals mid-M1).
 - Coordinates (locked): center=(0,0,0), +X=length, +Z=width, surface top at Y=`surface_y`
   (default 0). Y-up.
+- **Player forward = +Z (`global_transform.basis.z`)**: W walks toward +Z, and ALL forward
+  references in `player.gd`, `foot_ik.gd`, and `football_interaction.gd` agree on `+basis.z`.
+  The ball starts 1.8 m in front of the player at `(0, 0.11, +1.8)` in `Main.tscn` (within
+  the 2 m detection distance). Do NOT "fix" this to `-basis.z` for Godot camera convention —
+  the Ch38 model faces +Z.
 
 ### Player collision (PES/UFL model) — no per-body-part shapes
 

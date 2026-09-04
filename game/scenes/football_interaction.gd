@@ -55,7 +55,7 @@ enum State {
 
 @export_group("Visuals")
 @export var ball_radius := 0.11
-@export var debug_interactions := false
+@export var debug_interactions := true
 @export var debug_dribble_visuals := false
 
 var _state: int = State.NO_CONTROL
@@ -75,12 +75,16 @@ var _debug_sphere_foot: MeshInstance3D
 
 func _ready() -> void:
 	_player = get_parent() as CharacterBody3D
+	if debug_interactions:
+		print("[FI._ready] parent=", _player)
 	call_deferred("_deferred_init")
 
 
 func _deferred_init() -> void:
 	_foot_ik = _player.get_node_or_null("IK")
 	_find_ball()
+	if debug_interactions:
+		print("[FI._deferred_init] ball=", _ball, " ik=", _foot_ik)
 	if _ball != null:
 		_player.add_collision_exception_with(_ball)
 		_ball.add_collision_exception_with(_player)
@@ -90,6 +94,9 @@ func _find_ball() -> void:
 	var ball := get_tree().root.find_child("Ball", true, false)
 	if ball is CharacterBody3D:
 		_ball = ball as CharacterBody3D
+	if debug_interactions and _ball == null:
+		print("[FI._find_ball] NO BALL FOUND. root=", get_tree().root,
+			" children=", get_tree().root.get_children().map(func(c): return c.name))
 
 
 func _physics_process(delta: float) -> void:
@@ -200,7 +207,7 @@ func _compute_touch_direction() -> Vector3:
 	to_desired.y = 0.0
 	if to_desired.length_squared() > 0.001:
 		return to_desired.normalized()
-	return -_player.global_transform.basis.z
+	return _player.global_transform.basis.z
 
 
 func _compute_touch_speed() -> float:
@@ -261,7 +268,7 @@ func _ball_within_angle() -> bool:
 	var dist := horiz.length()
 	if dist < 0.8:
 		return true
-	var angle_deg := rad_to_deg(horiz.angle_to(Vector2.UP))
+	var angle_deg := rad_to_deg(horiz.angle_to(Vector2.DOWN))
 	return absf(angle_deg) <= detection_angle_deg * 0.5
 
 
@@ -280,7 +287,7 @@ func _ball_in_control_range() -> bool:
 func _compute_desired_ball_position() -> Vector3:
 	if _ball == null:
 		return Vector3.ZERO
-	var forward := -_player.global_transform.basis.z
+	var forward := _player.global_transform.basis.z
 	forward.y = 0.0
 	forward = forward.normalized()
 	var side := _player.global_transform.basis.x
@@ -328,7 +335,7 @@ func _get_ball_contact_point() -> Vector3:
 	if len > 0.01:
 		player_to_ball = player_to_ball / len
 	else:
-		player_to_ball = -_player.global_transform.basis.z
+		player_to_ball = _player.global_transform.basis.z
 	var side_dir := _player.global_transform.basis.x
 	if _active_foot == Foot.LEFT:
 		side_dir = -side_dir
@@ -349,7 +356,7 @@ func _do_pass() -> void:
 		return
 	_state = State.PASS
 	_player.play_kick("Kick_Soccerball")
-	var forward := -_player.global_transform.basis.z
+	var forward := _player.global_transform.basis.z
 	forward.y = 0.0
 	forward = forward.normalized()
 	_ball.apply_shot(forward, pass_power, pass_height)
@@ -361,7 +368,7 @@ func _do_shoot() -> void:
 		return
 	_state = State.SHOOT
 	_player.play_kick("Kick_Soccerball")
-	var forward := -_player.global_transform.basis.z
+	var forward := _player.global_transform.basis.z
 	forward.y = 0.0
 	forward = forward.normalized()
 	_ball.apply_shot(forward, shoot_power, shoot_elevation)
