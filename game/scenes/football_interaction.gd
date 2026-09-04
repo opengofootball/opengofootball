@@ -71,6 +71,7 @@ var _desired_ball_pos := Vector3.ZERO
 var _debug_sphere_desired: MeshInstance3D
 var _debug_sphere_predicted: MeshInstance3D
 var _debug_sphere_foot: MeshInstance3D
+var _debug_sphere_forward: MeshInstance3D
 
 
 func _ready() -> void:
@@ -428,19 +429,26 @@ func _update_debug() -> void:
 		_debug_sphere_desired = _make_debug_sphere("DesiredBallPos", Color(1.0, 1.0, 0.0))
 		_debug_sphere_predicted = _make_debug_sphere("PredictedBall", Color(0.0, 1.0, 0.5))
 		_debug_sphere_foot = _make_debug_sphere("FootContact", Color(1.0, 0.5, 0.0))
+		_debug_sphere_forward = _make_debug_sphere("PlayerForward", Color(0.0, 1.0, 0.0))
 	if not debug_dribble_visuals:
 		if _debug_sphere_desired != null:
 			_debug_sphere_desired.queue_free()
 			_debug_sphere_predicted.queue_free()
 			_debug_sphere_foot.queue_free()
+			_debug_sphere_forward.queue_free()
 			_debug_sphere_desired = null
 			_debug_sphere_predicted = null
 			_debug_sphere_foot = null
+			_debug_sphere_forward = null
 		return
 	_desired_ball_pos = _compute_desired_ball_position()
 	_debug_sphere_desired.global_position = _desired_ball_pos
 	_debug_sphere_predicted.global_position = _compute_predicted_ball_position()
 	_debug_sphere_foot.global_position = _get_ball_contact_point() if _active_foot != Foot.NONE else Vector3(0.0, -1000.0, 0.0)
+	var player_forward := _player.global_transform.basis.z
+	var forward_marker := _player.global_position + player_forward * 1.0
+	forward_marker.y = _player.global_position.y + 0.2
+	_debug_sphere_forward.global_position = forward_marker
 
 
 func _make_debug_sphere(sphere_name: String, sphere_color: Color) -> MeshInstance3D:

@@ -21,7 +21,7 @@ shape = SubResource("Cap_m1")
 
 [node name="BallContact" type="Area3D" parent="."]
 collision_layer = 4
-collision_mask = 1
+collision_mask = 2
 monitoring = true
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="BallContact"]
