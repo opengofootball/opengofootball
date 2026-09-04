@@ -6,6 +6,7 @@ extends Node3D
 @export var max_slope_deg := 15.0
 @export var ray_up := 0.8
 @export var ray_down := 1.2
+@export var debug_visuals := false
 
 const LEFT_ROOT := "mixamorig5_LeftUpLeg"
 const LEFT_MID := "mixamorig5_LeftLeg"
@@ -30,6 +31,11 @@ var _right_foot_idx := -1
 var _ball_ik_active := false
 var _ball_ik_foot := ""
 var _ball_ik_target := Vector3.ZERO
+var _ball_ik_influence := 0.0
+var _ball_ik_target_influence := 0.0
+var _ball_ik_blend_speed := 8.0
+var _debug_target: Node3D
+var _debug_ball: Node3D
 
 
 func _ready() -> void:
@@ -88,12 +94,16 @@ func _make_leg_ik(ik_name: String, root_bone: String, mid_bone: String, end_bone
 func _physics_process(delta: float) -> void:
 	if _skeleton == null:
 		return
-	if _ball_ik_active:
+	_ball_ik_influence = move_toward(
+		_ball_ik_influence, _ball_ik_target_influence, _ball_ik_blend_speed * delta
+	)
+	_update_debug()
+	if _ball_ik_active and _ball_ik_influence > 0.001:
 		if _ball_ik_foot == "left":
-			_solve_ball_foot(_left_target, _left_pole, delta)
+			_solve_ball_foot(_left_target, _left_pole, _ball_ik_influence, delta)
 			_solve_foot(_right_ray, _right_target, _right_foot_idx, delta)
 		else:
-			_solve_ball_foot(_right_target, _right_pole, delta)
+			_solve_ball_foot(_right_target, _right_pole, _ball_ik_influence, delta)
 			_solve_foot(_left_ray, _left_target, _left_foot_idx, delta)
 	else:
 		_solve_foot(_left_ray, _left_target, _left_foot_idx, delta)
@@ -118,25 +128,84 @@ func _solve_foot(ray: RayCast3D, target: Node3D, foot_idx: int, delta: float) ->
 	target.global_transform = target.global_transform.interpolate_with(desired, weight)
 
 
-func _solve_ball_foot(target: Node3D, pole: Node3D, delta: float) -> void:
+func _solve_ball_foot(target: Node3D, pole: Node3D, ball_influence: float, delta: float) -> void:
 	if target == null:
 		return
 	var weight := clampf(lerp_speed * delta, 0.0, 1.0)
 	var desired := target.global_transform
 	desired.origin = _ball_ik_target
+	var to_ball := (_ball_ik_target - _player.global_position)
+	to_ball.y = 0.0
+	to_ball = to_ball.normalized()
+	desired.basis = _orient_foot_basis(to_ball)
 	target.global_transform = target.global_transform.interpolate_with(desired, weight)
 	if pole != null:
-		var to_ball := (_ball_ik_target - _player.global_position).normalized()
 		var pole_pos := _ball_ik_target + to_ball * 0.3 + Vector3.UP * 0.4
 		var pole_desired := pole.global_transform
 		pole_desired.origin = pole_pos
 		pole.global_transform = pole.global_transform.interpolate_with(pole_desired, weight)
+	if target == _left_target:
+		_left_ik.influence = influence * ball_influence
+	else:
+		_right_ik.influence = influence * ball_influence
 
 
-func set_ball_ik(active: bool, foot: String, target: Vector3) -> void:
+func set_ball_ik(active: bool, foot: String, target: Vector3, influence_value := 1.0) -> void:
 	_ball_ik_active = active
 	_ball_ik_foot = foot
 	_ball_ik_target = target
+	_ball_ik_target_influence = influence_value
+	if not active:
+		_ball_ik_target_influence = 0.0
+		if _left_ik != null:
+			_left_ik.influence = influence
+		if _right_ik != null:
+			_right_ik.influence = influence
+
+
+func _update_debug() -> void:
+	if not debug_visuals and _debug_target == null:
+		return
+	if debug_visuals and _debug_target == null:
+		_debug_target = _make_debug_sphere("DebugFootTarget", Color(1.0, 0.5, 0.0))
+		_debug_ball = _make_debug_sphere("DebugBall", Color(0.0, 0.8, 1.0))
+	if not debug_visuals:
+		if _debug_target != null:
+			_debug_target.queue_free()
+			_debug_ball.queue_free()
+			_debug_target = null
+			_debug_ball = null
+		return
+	_debug_target.global_position = _ball_ik_target if _ball_ik_active else Vector3(0.0, -1000.0, 0.0)
+
+
+func _make_debug_sphere(sphere_name: String, sphere_color: Color) -> Node3D:
+	var sphere := MeshInstance3D.new()
+	sphere.name = sphere_name
+	var mesh := SphereMesh.new()
+	mesh.radius = 0.05
+	mesh.height = 0.1
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = sphere_color
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mesh.material = mat
+	sphere.mesh = mesh
+	add_child(sphere)
+	return sphere
+
+
+func _orient_foot_basis(to_ball: Vector3) -> Basis:
+	var up := Vector3.UP
+	var fwd := to_ball
+	if fwd.length_squared() < 0.0001:
+		fwd = _player.global_transform.basis.z.slide(up)
+	var f = fwd.slide(up).normalized()
+	var x := up.cross(f)
+	if x.length_squared() < 0.0001:
+		return Basis.IDENTITY
+	x = x.normalized()
+	var z := x.cross(up).normalized()
+	return Basis(x, up, z).orthonormalized()
 
 
 func _clamped_foot_basis(normal: Vector3, forward: Vector3) -> Basis:

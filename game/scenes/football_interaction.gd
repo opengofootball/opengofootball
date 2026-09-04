@@ -3,8 +3,11 @@ extends Node3D
 enum State { NONE, APPROACH, CONTROL, DRIBBLE, PASS, SHOOT }
 
 @export var detection_distance := 2.0
+@export var detection_angle_deg := 90.0
 @export var max_ball_height := 0.5
 @export var control_distance := 1.0
+@export var max_foot_reach := 1.3
+@export var reach_fade := 0.25
 @export var dribble_forward_offset := 0.6
 @export var dribble_side_offset := 0.15
 @export var pass_power := 8.0
@@ -96,11 +99,21 @@ func _ball_in_range() -> bool:
 		return false
 	if _ball.global_position.y - _player.global_position.y > max_ball_height:
 		return false
-	var to_ball := (_ball.global_position - _player.global_position).normalized()
-	var forward := -_player.global_transform.basis.z
-	forward.y = 0.0
-	forward = forward.normalized()
-	return to_ball.dot(forward) > 0.0 or dist < 0.8
+	if not _ball_within_angle():
+		return false
+	return true
+
+
+func _ball_within_angle() -> bool:
+	if _ball == null:
+		return false
+	var local_ball := _player.to_local(_ball.global_position)
+	var horiz := Vector2(local_ball.x, local_ball.z)
+	var dist := horiz.length()
+	if dist < 0.8:
+		return true
+	var angle_deg := rad_to_deg(horiz.angle_to(Vector2.UP))
+	return absf(angle_deg) <= detection_angle_deg * 0.5
 
 
 func _ball_in_control_range() -> bool:
@@ -186,9 +199,19 @@ func _update_foot_ik(_delta: float) -> void:
 	if _foot_ik == null:
 		return
 	if _state == State.CONTROL or _state == State.DRIBBLE:
-		_foot_ik.set_ball_ik(true, _active_foot, _get_ball_contact_point())
+		var reach_weight := _reach_weight()
+		_foot_ik.set_ball_ik(true, _active_foot, _get_ball_contact_point(), reach_weight)
 	else:
 		_foot_ik.set_ball_ik(false, "", Vector3.ZERO)
+
+
+func _reach_weight() -> float:
+	if _ball == null:
+		return 0.0
+	var dist := _player.global_position.distance_to(_ball.global_position)
+	if dist >= max_foot_reach:
+		return 0.0
+	return clampf(1.0 - (dist - (max_foot_reach - reach_fade)) / reach_fade, 0.0, 1.0)
 
 
 func _get_ball_contact_point() -> Vector3:
@@ -243,6 +266,9 @@ func get_ball_speed() -> float:
 
 func _debug_print() -> void:
 	var state_names := ["NONE", "APPROACH", "CONTROL", "DRIBBLE", "PASS", "SHOOT"]
-	print("STATE: %s | FOOT: %s | DIST: %.2fm | BALL_SPEED: %.2fm/s | HAS_BALL: %s" % [
-		state_names[_state], _active_foot, get_ball_distance(), get_ball_speed(), has_ball()
+	var ball_h := _ball.global_position.y - _player.global_position.y if _ball != null else 0.0
+	var reach := _reach_weight() if _state == State.CONTROL or _state == State.DRIBBLE else 0.0
+	print("STATE: %s | FOOT: %s | DIST: %.2fm | BALL_H: %.2fm | REACH: %.2f | DETECTED: %s | HAS_BALL: %s" % [
+		state_names[_state], _active_foot, get_ball_distance(), ball_h, reach,
+		_ball_in_range(), has_ball()
 	])
