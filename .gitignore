@@ -1,0 +1,19 @@
+# Godot editor cache
+game/.godot/
+
+# Engine binaries
+Godot_v4.6.3-stable_win64.exe
+Godot_v4.6.3-stable_linux.x86_64
+
+# Installers / archives
+*.exe
+*.zip
+*.rar
+*:Zone.Identifier
+
+# PES source assets (external input, not our code)
+Assets/
+PES Exporter/
+
+# Build output
+work/
