@@ -8,8 +8,11 @@ enum State {
 	CONTACT_READY,
 	CONTROLLED,
 	DRIBBLING,
+	PASS_REQUESTED,
+	PASS_PREPARING,
+	PASS_CONTACT,
+	PASS_EXECUTED,
 	RELEASED,
-	PASS,
 	SHOOT,
 }
 
@@ -44,12 +47,20 @@ enum State {
 @export var max_foot_reach := 1.3
 @export var reach_fade := 0.25
 
-@export_group("Pass / Shoot")
-@export var pass_power := 8.0
-@export var pass_height := 0.0
+const PassDataClass := preload("res://scenes/pass_data.gd")
+const PassIntentClass := preload("res://scenes/pass_intent.gd")
+
+@export_group("Pass")
+@export var kick_cooldown_time := 0.3
+@export var pass_prep_time := 0.20
+@export var pass_follow_through := 0.15
+@export var pass_max_height := 0.35
+@export var pass_movement_multiplier := 0.5
+@export var pass_target_node_path := ""
+
+@export_group("Shoot (legacy Stage 5 stub, not Stage 6 scope)")
 @export var shoot_power := 18.0
 @export var shoot_elevation := 0.8
-@export var kick_cooldown_time := 0.3
 
 @export_group("Simulation")
 @export var sim_rate := 100.0
@@ -58,11 +69,17 @@ enum State {
 @export var ball_radius := 0.11
 @export var debug_interactions := true
 @export var debug_dribble_visuals := false
+@export var debug_pass_visuals := false
 
 var _state: int = State.NO_CONTROL
 var _ball: CharacterBody3D
 var _player: CharacterBody3D
 var _foot_ik: Node3D
+var _pass_controller: Node
+var _pass_target: Node3D
+var _pass_intent: Object
+var _pass_data: Object
+var _pass_timer := 0.0
 var _active_foot: int = Foot.RIGHT
 var _previous_foot: int = Foot.RIGHT
 var _touch_cooldown := 0.0
@@ -73,6 +90,8 @@ var _debug_sphere_desired: MeshInstance3D
 var _debug_sphere_predicted: MeshInstance3D
 var _debug_sphere_foot: MeshInstance3D
 var _debug_sphere_forward: MeshInstance3D
+var _debug_pass_arrow: MeshInstance3D
+var _debug_pass_target_sphere: MeshInstance3D
 
 
 func _ready() -> void:
@@ -84,9 +103,12 @@ func _ready() -> void:
 
 func _deferred_init() -> void:
 	_foot_ik = _player.get_node_or_null("IK")
+	_pass_controller = _player.get_node_or_null("PassController")
+	if pass_target_node_path != "":
+		_pass_target = _player.get_node_or_null(pass_target_node_path)
 	_find_ball()
 	if debug_interactions:
-		print("[FI._deferred_init] ball=", _ball, " ik=", _foot_ik)
+		print("[FI._deferred_init] ball=", _ball, " ik=", _foot_ik, " pass=", _pass_controller, " target=", _pass_target)
 	if _ball != null:
 		_player.add_collision_exception_with(_ball)
 		_ball.add_collision_exception_with(_player)
@@ -107,6 +129,8 @@ func _physics_process(delta: float) -> void:
 		return
 	_kick_cooldown = maxf(_kick_cooldown - delta, 0.0)
 	_handle_input()
+	if _pass_controller != null and bool(_pass_controller.call("is_charging")):
+		_pass_controller.call("update_charge", delta)
 	_sim_accumulator += delta
 	var sim_dt := 1.0 / sim_rate
 	while _sim_accumulator >= sim_dt:
@@ -165,9 +189,27 @@ func _update_state(dt: float) -> void:
 				_state = State.CONTROLLED
 		State.RELEASED:
 			_state = State.NO_CONTROL
-		State.PASS:
-			_kick_cooldown = kick_cooldown_time
-			_state = State.APPROACHING
+		State.PASS_REQUESTED:
+			if _pass_intent == null:
+				_state = State.RELEASED
+			else:
+				_select_pass_foot(_pass_intent.direction)
+				_player.play_kick("Kick_Soccerball")
+				_kick_cooldown = kick_cooldown_time
+				_pass_timer = pass_prep_time
+				_state = State.PASS_PREPARING
+		State.PASS_PREPARING:
+			_pass_timer -= dt
+			if _pass_timer <= 0.0:
+				_execute_pass_contact()
+				_pass_timer = pass_follow_through
+				_state = State.PASS_CONTACT
+		State.PASS_CONTACT:
+			_pass_timer -= dt
+			if _pass_timer <= 0.0:
+				_state = State.PASS_EXECUTED
+		State.PASS_EXECUTED:
+			_state = State.RELEASED
 		State.SHOOT:
 			_kick_cooldown = kick_cooldown_time
 			_state = State.APPROACHING
@@ -330,9 +372,11 @@ func _update_foot_ik(_delta: float) -> void:
 	if _foot_ik == null:
 		return
 	var ik_active := _state == State.CONTROLLED or _state == State.DRIBBLING or _state == State.CONTACT_READY
+	ik_active = ik_active or _in_pass_state()
 	if ik_active and _active_foot != Foot.NONE:
 		var reach_weight := _reach_weight()
-		_foot_ik.set_ball_ik(true, _foot_name(_active_foot), _get_ball_contact_point(), reach_weight)
+		var contact := _get_pass_contact_point() if _in_pass_state() else _get_ball_contact_point()
+		_foot_ik.set_ball_ik(true, _foot_name(_active_foot), contact, reach_weight)
 	else:
 		_foot_ik.set_ball_ik(false, "", Vector3.ZERO)
 
@@ -358,21 +402,108 @@ func _get_ball_contact_point() -> Vector3:
 
 func _handle_input() -> void:
 	if Input.is_action_just_pressed("football_pass"):
-		_do_pass()
-	elif Input.is_action_just_pressed("football_shoot"):
+		_begin_pass_charge()
+	if Input.is_action_just_released("football_pass"):
+		_finish_pass_charge()
+	if Input.is_action_just_pressed("football_shoot"):
 		_do_shoot()
+	if Input.is_action_just_pressed("football_cancel_pass"):
+		_cancel_pass()
 
 
-func _do_pass() -> void:
-	if _ball == null or _kick_cooldown > 0.0 or not _ball_in_control_range():
+func _begin_pass_charge() -> void:
+	if _pass_controller == null or not _pass_controller.has_method("begin_charge"):
 		return
-	_state = State.PASS
-	_player.play_kick("Kick_Soccerball")
-	var forward := _player.global_transform.basis.z
-	forward.y = 0.0
-	forward = forward.normalized()
-	_ball.apply_shot(forward, pass_power, pass_height)
-	_kick_cooldown = kick_cooldown_time
+	if _kick_cooldown > 0.0 or not _ball_in_control_range():
+		return
+	if _state != State.CONTROLLED and _state != State.DRIBBLING:
+		return
+	_pass_controller.call("begin_charge")
+
+
+func _finish_pass_charge() -> void:
+	if _pass_controller == null or not bool(_pass_controller.call("is_charging")):
+		return
+	var power: float = _pass_controller.call("finish_charge")
+	if power < float(_pass_controller.get("min_pass_power")) or _kick_cooldown > 0.0:
+		return
+	if _state != State.CONTROLLED and _state != State.DRIBBLING:
+		return
+	if not _ball_in_control_range():
+		return
+	if _ball.global_position.y - _player.global_position.y > pass_max_height:
+		return
+	_request_pass(power)
+
+
+func _cancel_pass() -> void:
+	if _pass_controller != null and bool(_pass_controller.call("is_charging")):
+		_pass_controller.call("cancel_charge")
+	if _state == State.PASS_REQUESTED or _state == State.PASS_PREPARING:
+		_pass_intent = null
+		_pass_timer = 0.0
+		_state = State.CONTROLLED
+
+
+func _request_pass(power: float) -> void:
+	var intent := PassIntentClass.new()
+	intent.power = power
+	intent.pass_type = PassDataClass.PassType.GROUND
+	var dir := _pass_direction()
+	if _pass_target != null:
+		var predicted := _pass_controller.call("predicted_target_position", _ball, _pass_target, power) as Vector3
+		intent.target = _pass_target
+		intent.target_position = _pass_target.global_position
+		intent.predicted_target = predicted
+		var to_target := predicted - _ball.global_position
+		to_target.y = 0.0
+		if to_target.length() > 0.01:
+			dir = to_target.normalized()
+	intent.direction = dir
+	intent.requested = true
+	_pass_intent = intent
+	_state = State.PASS_REQUESTED
+
+
+func _execute_pass_contact() -> void:
+	if _ball == null or _pass_intent == null or _pass_controller == null:
+		_state = State.RELEASED
+		return
+	_pass_data = _pass_controller.call("build_pass_data", _player, _ball, _pass_intent)
+	if _pass_data == null:
+		_state = State.RELEASED
+		return
+	if debug_interactions:
+		print("PASS CONTACT -> impulse %.2f m/s toward (%+.2f, %+.2f) power=%.0f%% foot=%s"
+			% [_pass_data.speed, _pass_data.direction.x, _pass_data.direction.z,
+				_pass_data.power * 100.0, _foot_name(_active_foot)])
+	_ball.apply_pass(_pass_data)
+	_pass_intent = null
+
+
+func _pass_direction() -> Vector3:
+	var ix := Input.get_axis("turn_left", "turn_right")
+	var iz := Input.get_axis("move_back", "move_forward")
+	if absf(ix) < 0.01 and absf(iz) < 0.01:
+		iz = 1.0
+	var fwd := _player.global_transform.basis.z
+	fwd.y = 0.0
+	fwd = fwd.normalized()
+	var right := _player.global_transform.basis.x
+	right.y = 0.0
+	right = right.normalized()
+	var world := fwd * iz + right * ix
+	return world.normalized()
+
+
+func _select_pass_foot(pass_dir: Vector3) -> void:
+	_select_foot()
+	if _ball == null:
+		return
+	var side_hit := pass_dir.dot(_player.global_transform.basis.x)
+	var local_ball := _player.to_local(_ball.global_position)
+	if absf(local_ball.x) < 0.25 and absf(side_hit) > 0.4:
+		_active_foot = Foot.RIGHT if side_hit < 0.0 else Foot.LEFT
 
 
 func _do_shoot() -> void:
@@ -396,12 +527,46 @@ func _foot_name(f: int) -> String:
 	return "left" if f == Foot.LEFT else "right"
 
 
+func _get_pass_contact_point() -> Vector3:
+	if _pass_controller == null or not _pass_controller.has_method("pass_contact_point"):
+		return _get_ball_contact_point()
+	return _pass_controller.call("pass_contact_point",
+		_player, _ball, _active_foot == Foot.LEFT, ball_radius)
+
+
+func _in_pass_state() -> bool:
+	return _state == State.PASS_REQUESTED or _state == State.PASS_PREPARING \
+		or _state == State.PASS_CONTACT or _state == State.PASS_EXECUTED
+
+
 func has_ball() -> bool:
-	return _state == State.CONTROLLED or _state == State.DRIBBLING
+	return _state == State.CONTROLLED or _state == State.DRIBBLING or _in_pass_state()
 
 
 func get_state() -> int:
 	return _state
+
+
+func get_movement_multiplier() -> float:
+	if _in_pass_state():
+		return pass_movement_multiplier
+	return 1.0
+
+
+func get_pass_intent():
+	return _pass_intent
+
+
+func is_charging_pass() -> bool:
+	if _pass_controller == null:
+		return false
+	return bool(_pass_controller.call("is_charging"))
+
+
+func get_pass_charge() -> float:
+	if _pass_controller == null:
+		return 0.0
+	return float(_pass_controller.call("charge_power"))
 
 
 func get_active_foot() -> String:
@@ -434,6 +599,7 @@ func get_foot_contact_position() -> Vector3:
 
 
 func _update_debug() -> void:
+	_update_pass_debug()
 	if not debug_dribble_visuals and _debug_sphere_desired == null:
 		return
 	if debug_dribble_visuals and _debug_sphere_desired == null:
@@ -460,6 +626,52 @@ func _update_debug() -> void:
 	var forward_marker := _player.global_position + player_forward * 1.0
 	forward_marker.y = _player.global_position.y + 0.2
 	_debug_sphere_forward.global_position = forward_marker
+	_update_pass_debug()
+
+
+func _update_pass_debug() -> void:
+	var show := debug_pass_visuals and (is_charging_pass() or _in_pass_state() or _pass_intent != null)
+	if not show:
+		if _debug_pass_arrow != null:
+			_debug_pass_arrow.queue_free()
+			_debug_pass_arrow = null
+		if _debug_pass_target_sphere != null:
+			_debug_pass_target_sphere.queue_free()
+			_debug_pass_target_sphere = null
+		return
+	var power := get_pass_charge()
+	var dir := _pass_direction()
+	if _pass_intent != null:
+		power = _pass_intent.power
+		dir = _pass_intent.direction
+	if _pass_controller == null:
+		return
+	var speed: float = _pass_controller.call("compute_speed", power)
+	if _debug_pass_arrow == null:
+		_debug_pass_arrow = MeshInstance3D.new()
+		_debug_pass_arrow.name = "PassArrow"
+		var mesh := BoxMesh.new()
+		mesh.size = Vector3(0.06, 0.06, 1.0)
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = Color(0.0, 1.0, 0.5)
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		mesh.material = mat
+		_debug_pass_arrow.mesh = mesh
+		add_child(_debug_pass_arrow)
+	var length := clampf(speed * 0.2, 0.4, 6.0)
+	var origin := _ball.global_position if _ball != null else _player.global_position
+	_debug_pass_arrow.global_position = origin + Vector3.UP * 0.25 + dir * length * 0.5
+	_debug_pass_arrow.scale = Vector3(1.0, 1.0, length)
+	_debug_pass_arrow.global_rotation = Vector3.ZERO
+	_debug_pass_arrow.look_at(origin + Vector3.UP * 0.25 + dir * length, Vector3.UP)
+	if _pass_target != null and _pass_intent != null:
+		if _debug_pass_target_sphere == null:
+			_debug_pass_target_sphere = _make_debug_sphere("PassTargetPredicted", Color(1.0, 0.0, 1.0))
+		_debug_pass_target_sphere.global_position = _pass_intent.predicted_target
+	else:
+		if _debug_pass_target_sphere != null:
+			_debug_pass_target_sphere.queue_free()
+			_debug_pass_target_sphere = null
 
 
 func _make_debug_sphere(sphere_name: String, sphere_color: Color) -> MeshInstance3D:
@@ -478,10 +690,17 @@ func _make_debug_sphere(sphere_name: String, sphere_color: Color) -> MeshInstanc
 
 
 func _debug_print() -> void:
-	var state_names := ["NO_CONTROL","BALL_DETECTED","APPROACHING","CONTACT_READY","CONTROLLED","DRIBBLING","RELEASED","PASS","SHOOT"]
+	var state_names := ["NO_CONTROL","BALL_DETECTED","APPROACHING","CONTACT_READY","CONTROLLED","DRIBBLING",
+		"PASS_REQUESTED","PASS_PREPARING","PASS_CONTACT","PASS_EXECUTED","RELEASED","SHOOT"]
 	var ball_h := _ball.global_position.y - _player.global_position.y if _ball != null else 0.0
 	var reach := _reach_weight() if _state == State.CONTROLLED or _state == State.DRIBBLING else 0.0
-	print("STATE: %s | FOOT: %s | DIST: %.2fm | BALL_H: %.2fm | BALL_V: %.2f | REACH: %.2f | TOUCH_CD: %.2f | HAS_BALL: %s" % [
+	var pass_info := ""
+	if _pass_controller != null and bool(_pass_controller.call("is_charging")):
+		pass_info = " | CHARGE: %d%%" % int(float(_pass_controller.call("charge_power")) * 100.0)
+	if _pass_intent != null:
+		pass_info += " | PASS PWR: %d%% DIR: (%+.2f, %+.2f)" % [
+			int(_pass_intent.power * 100.0), _pass_intent.direction.x, _pass_intent.direction.z]
+	print("STATE: %s | FOOT: %s | DIST: %.2fm | BALL_H: %.2fm | BALL_V: %.2f | REACH: %.2f | TOUCH_CD: %.2f | HAS_BALL: %s%s" % [
 		state_names[_state], _foot_name(_active_foot), get_ball_distance(), ball_h,
-		get_ball_speed(), reach, _touch_cooldown, has_ball()
+		get_ball_speed(), reach, _touch_cooldown, has_ball(), pass_info
 	])

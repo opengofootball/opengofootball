@@ -55,6 +55,18 @@ func apply_touch(impulse: Vector3, spin_impulse := Vector3.ZERO) -> void:
 	_spin += spin_impulse
 
 
+func apply_pass(pass_data) -> void:
+	var dir: Vector3 = pass_data.direction
+	dir.y = 0.0
+	if dir.length_squared() < 0.0001:
+		dir = Vector3.FORWARD
+	var vel: Vector3 = dir.normalized() * pass_data.speed
+	vel += pass_data.player_velocity * pass_data.player_velocity_influence
+	vel.y = pass_data.lift
+	velocity = vel
+	_spin = pass_data.spin
+
+
 func apply_shot(direction: Vector3, power: float, elevation := 0.0, spin_impulse := Vector3.ZERO) -> void:
 	var vel := direction.normalized() * power
 	vel.y = elevation

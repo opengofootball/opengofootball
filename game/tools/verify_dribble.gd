@@ -66,7 +66,7 @@ func _run() -> void:
 	if local.z <= 0.2:
 		_fail("ball not carried in front (local.z=%.2f, behind/side)" % local.z)
 
-	fi.call("_do_pass")
+	fi.call("_request_pass", 0.5)
 	var recaptured := false
 	print("[verify_dribble] phase2 kick -> ball_speed=", ball.velocity.length())
 	for i in 900:

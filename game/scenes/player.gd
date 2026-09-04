@@ -80,14 +80,18 @@ func _physics_process(delta: float) -> void:
 
 	var move := Input.get_axis("move_back", "move_forward")
 	var dribble := Input.is_action_pressed("dribble")
+	var speed_multiplier := 1.0
+	if _interaction != null and _interaction.has_method("get_movement_multiplier"):
+		speed_multiplier = float(_interaction.call("get_movement_multiplier"))
 	var forward := global_transform.basis.z
 	forward.y = 0.0
 	if forward.length_squared() > 0.0001:
 		forward = forward.normalized()
 	else:
 		forward = Vector3(0.0, 0.0, 1.0)
-	velocity.x = forward.x * move * (sprint_speed if dribble else jog_speed)
-	velocity.z = forward.z * move * (sprint_speed if dribble else jog_speed)
+	var speed := (sprint_speed if dribble else jog_speed) * speed_multiplier
+	velocity.x = forward.x * move * speed
+	velocity.z = forward.z * move * speed
 	move_and_slide()
 	_update_anim(move, dribble)
 	_debug_dump()
@@ -250,6 +254,7 @@ func _ensure_input_actions() -> void:
 	_add_key("dribble", KEY_E)
 	_add_key("football_pass", KEY_Q)
 	_add_key("football_shoot", KEY_F)
+	_add_key("football_cancel_pass", KEY_ESCAPE)
 
 func _add_key(action: String, keycode: Key) -> void:
 	if not InputMap.has_action(action):

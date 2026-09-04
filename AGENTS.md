@@ -258,8 +258,73 @@ Stadium (Main.tscn)
   IK + bones) and `--headless --path game --script res/tools/verify_dribble.gd`
   (deterministic Stage 5 carry test: drives player at jog into the ball, asserts DRIBBLING
   reached and ball stays in front within `max_control_distance` for 10 simulated seconds,
-  then kicks the ball (pass) and asserts the player recaptures and carries it again —
-  guards the `_touch_cooldown` freeze that previously deadlocked post-kick recapture).
+  then kicks the ball via the Stage 6 pass API and asserts the player recaptures and
+  carries it again — guards the `_touch_cooldown` freeze that previously deadlocked
+  post-kick recapture).
+
+### Stage 6 — Passing system (charge + player-relative direction)
+
+- **+Z forward is reused for pass direction** (Stage 5 convention; Ch38 faces +Z). The
+  Stage 6 spec's "Forward = -Z" wording is **ignored** — it contradicts the established
+  movement convention this codebase verified. Direction is computed in `football_interaction`
+  via player-local WASD (W=fwd, S=back, A=left, D=right) transformed through
+  `basis.z`/`basis.x`, with `Input.get_axis` — never a second hard-coded forward.
+- **Architecture** (three new small classes, no global `class_name` — preload-based,
+  because this repo runs new `class_name` scripts unreliably on the headless Linux box
+  until the editor import pass registers the global class cache):
+  - `game/scenes/pass_data.gd` — plain `RefCounted` bag (`PassType` enum GROUND/LOB/
+    THROUGH/CROSS/SHOT, direction, speed, power, lift, spin, player_velocity,
+    player_velocity_influence). `velocity()` = `dir*speed + player_velocity*influence`,
+    `vel.y=lift`.
+  - `game/scenes/pass_intent.gd` — `RefCounted` intent (direction, optional target +
+    target_position, predicted_target, power, pass_type).
+  - `game/scenes/pass_controller.gd` — `Node` under `Player`, **pure logic, no Input
+    reads** (FootballInteraction owns input). Charge lifecycle (`begin/update/cancel/
+    finish_charge`, `charge_time=1.0`), default `power_curve` built in `_ready` from
+    `CURVE_POINTS` [(0,0),(0.25,0.08),(0.5,0.35),(0.75,0.7),(1,1)], `min_pass_power=0.15`,
+    `compute_speed` (4.0–14.0 m/s via curve), `predicted_target_position` (target lead by
+    `target.velocity * est_travel`), `build_pass_data`, and `pass_contact_point` (predicted
+    ball pos struck from the active-foot side, `pass_contact_lift=-0.03`).
+- **Flow**: `Q` press → `_begin_pass_charge` (gated: kick cooldown clear, ball in control,
+  state CONTROLLED/DRIBBLING) → held amount maps to power via curve → release →
+  `_finish_pass_charge` re-validates (min power, no cooldown, still CONTROLLED/DRIBBLING,
+  `_ball_in_control_range`, ball height ≤ `pass_max_height=0.35`) → `_request_pass` builds
+  PassIntent → state machine `PASS_REQUESTED → PASS_PREPARING (kick anim, `pass_prep_time`
+  0.20) → PASS_CONTACT (impulse at `pass_follow_through` via `_execute_pass_contact` →
+  `ball.apply_pass(pass_data)`) → PASS_EXECUTED (transient 1 sim-step) → RELEASED →
+  NO_CONTROL`. **Impulse fires only at the contact event inside `_sim_step`** — never from
+  `_process`. `Esc` (`football_cancel_pass`) cancels from charge or PASS_REQUESTED/
+  PASS_PREPARING → back to CONTROLLED with no impulse.
+- **Ball physics**: `ball.gd apply_pass(pass_data)` sets `velocity = dir.normalized()*speed
+  + player_velocity*influence`, `velocity.y = lift` (0.0 for ground), `_spin`. No
+  teleportation; ball stays a free `CharacterBody3D`.
+- **Foot selection**: `_select_pass_foot(pass_dir)` = Stage 5 `_select_foot()` plus a
+  cross-body bias — when ball is nearly centered (|local.x|<0.25) and the pass direction
+  has a strong lateral component, weak-side foot is chosen (left pass → RIGHT foot).
+- **Ball IK during pass**: `_in_pass_state()` makes `has_ball()` true and keeps Ball IK
+  active; the contact target uses `PassController.pass_contact_point` (predicted ball,
+  side offset, lower strike point) instead of the dribble contact.
+- **Movement multiplier**: `FootballInteraction.get_movement_multiplier()` returns
+  `pass_movement_multiplier` (0.5) while in a pass state; `player.gd` multiplies jog/sprint
+  speed by it (executes via the same `_ensure_input_actions` dynamic Input Map registration).
+- **Input Map actions** (registered in `player.gd`): `football_pass`=Q (charge), `Esc`=
+  `football_cancel_pass`, `football_shoot`=F stays a legacy Stage 5 stub (`State.SHOOT`,
+  not Stage 6 scope).
+- **Target-based passing (optional)**: set `pass_target_node_path`; `_request_pass` then
+  ignores WASD direction and aims at `predicted_target_position` (moving-target lead).
+- **Debug**: `debug_pass_visuals` draws an unshaded green arrow (stretched BoxMesh aligned
+  to intended direction, length ~ speed) + magenta sphere at predicted target.
+  `_debug_print` appends `CHARGE %` (during charging) and `PASS PWR/DIR` (when an intent
+  exists). `_pass_data` keeps the LAST executed pass (cancelled/rejected passes leave it
+  unchanged).
+- Headless verify: `--headless --path game --script res/tools/verify_pass.gd`
+  (deterministic: phase1 dribble→possession; short vs full forward pass with power/speed
+  scaling + `PASS REQUESTED/PREPARING/CONTACT` chain; left-directed pass asserts world dir
+  ≈ -0.71,+0.71; cancel-before-execution leaves intent+state clean with no impulse;
+  too-far release rejected with no intent). Note the test re-establishes possession by
+  resetting the scene between offline passes (a straight-forward chase cannot recover a
+  ball passed 23 m offline). Also `verify_foot_ik.gd` (2 TwoBoneIK3D nodes) and the
+  production `--quit-after 40` run.
 
 ### Short 3D mown grass (`field/grass/` — port of karl/godot-grass)
 
