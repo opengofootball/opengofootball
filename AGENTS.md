@@ -169,25 +169,46 @@ Stadium (Main.tscn)
 - Foot plant/swing and pelvis offset are **not** in 3.1 — walking may look glued.
 - Headless check: `--headless --path game --script res://tools/verify_foot_ik.gd`
 
-### Stage 4 — Football interaction (ball approach / control / dribble / pass / shoot)
+### Stage 4+5 — Football interaction (ball control / dribbling)
 
 - **Architecture**: `FootballInteraction` is a child `Node3D` of `Player`, separate from
   `player.gd` (movement) and `foot_ik.gd` (IK). The ball (`ball.gd` / `ball.tscn`) is
   an independent `CharacterBody3D` on collision layer 2. It is **never** reparented.
-- **State machine** (`football_interaction.gd`): `NONE → APPROACH → CONTROL → DRIBBLE`.
-  `PASS` and `SHOOT` are transient states that fire an impulse then return to `APPROACH`.
+- **State machine** (`football_interaction.gd`): `NO_CONTROL → BALL_DETECTED → APPROACHING
+  → CONTACT_READY → CONTROLLED → DRIBBLING → RELEASED`. `PASS` and `SHOOT` are transient
+  states that fire an impulse then return to `APPROACHING`. Simulation runs at 100 Hz via a
+  fixed-step accumulator (`sim_rate`).
 - **Ball detection**: `FootballInteraction` reads the ball reference directly (no
-  `BallDetector` area; detection is fully parametric). Tunables for the "in reach" gate:
-  `detection_distance` (2.0 m), `detection_angle_deg` (90° — frontal cone in player-local
-  space), `max_ball_height` (0.5 m), `control_distance` (1.0 m). The player-local cone
-  filter (`_ball_within_angle()`) prevents acting on balls behind the player, relaxed
-  within 0.8 m.
-- **Dynamic foot selection**: `to_local(ball.global_position).x < 0 → left foot`, else
-  right. Selection happens on entering `CONTROL`. Exposed via `get_active_foot()`.
+  `BallDetector` area; detection is fully parametric). Tunables: `detection_distance` (2.0
+  m), `detection_angle_deg` (90° — frontal cone in player-local space), `detection_height`
+  (0.5 m), `max_ball_speed` (12.0 m/s). The player-local cone filter
+  (`_ball_within_angle()`) prevents acting on balls behind the player, relaxed within 0.8 m.
+- **Dynamic foot selection** (`Foot` enum): `to_local(ball.global_position).x < 0 → LEFT`,
+  else `RIGHT`. Considers previous foot and reachability; falls back to previous foot when
+  ball is outside reach. Exposed via `get_active_foot()` (returns `"left"` / `"right"`).
+- **Control envelope**: `control_distance` (0.9 m) scales with speed (`speed_factor` 0.15);
+  `max_control_distance` (1.25 m) triggers release; `control_height` (0.35 m) caps ball
+  height for control.
+- **Ball target prediction**: `_compute_predicted_ball_position()` = `ball.position +
+  ball.velocity × prediction_time` (0.10 s). IK targets and contact points use the
+  predicted position, not the raw ball position.
+- **Dynamic dribble target**: `_compute_desired_ball_position()` places the target at
+  `control_forward_distance` (0.65 m + 0.25 × speed_ratio) ahead of the player, offset to
+  the active foot side (`control_side_distance` 0.20 m). The target rotates with the player.
+- **Discrete timed touches** (replaces continuous velocity steering): Each touch calls
+  `ball.apply_touch(impulse)` with `impulse = (desired_delta_v × ball_mass ×
+  touch_control_factor)`. Touches fire at `touch_interval` (0.20 s) while in CONTROLLED or
+  DRIBBLING state. Ball physics remains authoritative between touches.
+- **Touch direction/strength**: Direction = toward desired ball position (or player forward
+  if aligned). Strength = lerp(`min_touch_speed`, `max_touch_speed`, f(speed, distance_err))
+  + `player_velocity × player_velocity_influence`. `touch_control_factor` (0.6) scales the
+  velocity correction impulse.
+- **Ball release**: Triggered when distance > `max_control_distance`, ball height >
+  `control_height`, or ball exits frontal detection angle.
 - **Ball IK** (`foot_ik.gd`): `set_ball_ik(active, foot, target, influence)` switches the
   active foot's `TwoBoneIK3D` target from ground raycast to ball contact point. The other
   foot keeps ground IK. Influence is `0.5` (same as ground). Ball IK is active during
-  `CONTROL` and `DRIBBLE`, off otherwise.
+  `CONTROLLED`, `DRIBBLING`, and `CONTACT_READY`, off otherwise.
 - **Reach weighting**: `max_foot_reach` (1.3 m) + `reach_fade` (0.25 m) drive a smooth
   curve so BallIK influence → 0 beyond leg reach (prevents leg overextension). The active
   foot's `TwoBoneIK3D.influence` = `influence × reach_weight`.
@@ -199,12 +220,10 @@ Stadium (Main.tscn)
 - **Debug visuals**: `foot_ik.gd` `debug_visuals := false` draws unshaded spheres at the
   foot target (orange) and ball (cyan) for tuning; `football_interaction.gd`
   `debug_interactions` prints state/foot/distance/height/reach/detected.
-- **Possession**: Logical flag only — `has_ball()` returns `true` in `CONTROL` or
-  `DRIBBLE`. The ball remains a free-simulating `CharacterBody3D`.
-- **Dribble**: Continuous velocity steering in `_update_dribble()`. Each physics frame
-  sets `ball.velocity = player.velocity + spring_correction` toward a target at
-  `dribble_forward_offset` (0.6) + `dribble_side_offset` (0.15) from the player, so the
-  ball rides in front during `DRIBBLE`.
+  `debug_dribble_visuals` draws spheres at the desired ball position (yellow), predicted
+  ball position (green), and foot contact target (orange).
+- **Possession**: Logical flag only — `has_ball()` returns `true` in `CONTROLLED` or
+  `DRIBBLING`. The ball remains a free-simulating `CharacterBody3D`.
 - **Pass** (`Q`): Impulse in player forward direction at `pass_power` (8.0).
 - **Shoot** (`F`): Impulse at `shoot_power` (18.0) with `shoot_elevation` (0.8 m/s).
 - **Ball physics** (`ball.gd`): Manual gravity, ground friction, air drag, bounce
