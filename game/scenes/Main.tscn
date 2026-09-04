@@ -48,4 +48,4 @@ script = ExtResource("1_cam")
 [node name="Player" parent="." instance=ExtResource("3_player")]
 
 [node name="Ball" parent="." instance=ExtResource("4_ball")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.11, 3)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.11, -2)

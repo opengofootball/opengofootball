@@ -108,8 +108,11 @@ func _physics_process(delta: float) -> void:
 
 
 func _sim_step(dt: float) -> void:
+	var prev_state := _state
 	_update_state(dt)
 	_handle_dribble(dt)
+	if debug_interactions and _state != prev_state:
+		_debug_print()
 
 
 func _update_state(dt: float) -> void:
@@ -167,6 +170,7 @@ func _update_state(dt: float) -> void:
 func _handle_dribble(dt: float) -> void:
 	if _state != State.DRIBBLING and _state != State.CONTROLLED:
 		return
+	_desired_ball_pos = _compute_desired_ball_position()
 	_touch_cooldown = maxf(_touch_cooldown - dt, 0.0)
 	if not _can_touch():
 		return
