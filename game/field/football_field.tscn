@@ -1,0 +1,8 @@
+[gd_scene load_steps=2 format=3 uid="uid://opengofootball_m1_field"]
+
+[ext_resource type="Script" path="res://field/football_field.gd" id="1_field"]
+
+[node name="FootballField" type="Node3D"]
+script = ExtResource("1_field")
+field_length = 115.0
+field_width = 76.0

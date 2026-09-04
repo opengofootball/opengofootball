@@ -1,0 +1,67 @@
+[gd_scene load_steps=6 format=3 uid="uid://opengofootball_m1_player"]
+
+[ext_resource type="Script" path="res://scenes/player.gd" id="1_player"]
+[ext_resource type="Script" path="res://scenes/foot_ik.gd" id="2_foot_ik"]
+[ext_resource type="Script" path="res://scenes/football_interaction.gd" id="3_football"]
+
+[sub_resource type="CapsuleShape3D" id="Cap_m1"]
+radius = 0.35
+height = 1.8
+
+[sub_resource type="SphereShape3D" id="Contact_m1"]
+radius = 0.12
+
+[node name="Player" type="CharacterBody3D"]
+floor_snap_length = 0.2
+script = ExtResource("1_player")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
+shape = SubResource("Cap_m1")
+
+[node name="BallContact" type="Area3D" parent="."]
+collision_layer = 4
+collision_mask = 1
+monitoring = true
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="BallContact"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.12, 0)
+shape = SubResource("Contact_m1")
+
+[node name="FootRay" type="RayCast3D" parent="."]
+target_position = Vector3(0, -0.1, -0.35)
+
+[node name="IK" type="Node3D" parent="."]
+script = ExtResource("2_foot_ik")
+
+[node name="LeftFootTarget" type="Node3D" parent="IK"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.12, 0.05, 0)
+
+[node name="RightFootTarget" type="Node3D" parent="IK"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.12, 0.05, 0)
+
+[node name="LeftFootPole" type="Node3D" parent="IK"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.12, 0.45, 0.35)
+
+[node name="RightFootPole" type="Node3D" parent="IK"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.12, 0.45, 0.35)
+
+[node name="GroundDetection" type="Node3D" parent="."]
+
+[node name="LeftFootRay" type="RayCast3D" parent="GroundDetection"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.12, 0.8, 0)
+target_position = Vector3(0, -1.2, 0)
+collision_mask = 1
+hit_from_inside = true
+
+[node name="RightFootRay" type="RayCast3D" parent="GroundDetection"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.12, 0.8, 0)
+target_position = Vector3(0, -1.2, 0)
+collision_mask = 1
+hit_from_inside = true
+
+[node name="CameraTarget" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.2, 0)
+
+[node name="FootballInteraction" type="Node3D" parent="."]
+script = ExtResource("3_football")

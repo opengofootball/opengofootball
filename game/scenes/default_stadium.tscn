@@ -1,0 +1,9 @@
+[gd_scene load_steps=2 format=3 uid="uid://opengofootball_m1_default_stadium"]
+
+[ext_resource type="PackedScene" path="res://field/football_field.tscn" id="1_field"]
+
+[node name="Stadium" type="Node3D"]
+
+[node name="FootballField" parent="." instance=ExtResource("1_field")]
+
+[node name="StadiumVisual" type="Node3D" parent="."]

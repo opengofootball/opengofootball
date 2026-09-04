@@ -1,0 +1,9 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://field/grass/grass_grid.gd" id="1_grid"]
+
+[node name="GrassGrid" type="Node3D"]
+script = ExtResource("1_grid")
+field_width = 76.0
+field_length = 115.0
+cell_size = 5.0
