@@ -207,7 +207,10 @@ Stadium (Main.tscn)
 - **Discrete timed touches** (replaces continuous velocity steering): Each touch calls
   `ball.apply_touch(impulse)` with `impulse = (desired_delta_v × ball_mass ×
   touch_control_factor)`. Touches fire at `touch_interval` (0.20 s) while in CONTROLLED or
-  DRIBBLING state. Ball physics remains authoritative between touches.
+  DRIBBLING state. Ball physics remains authoritative between touches. `_touch_cooldown`
+  is decremented in `_sim_step` **every** state (not just in the dribbling states) — a
+  frozen cooldown from a kick must not deadlock the next CONTACT_READY → DRIBBLING
+  transition.
 - **Touch direction/strength**: Direction = toward desired ball position, blended toward
   player forward as the ball approaches the feet (`close_forward_bias` 0.6, scaled by
   `close_bias = 1 − dist/control_distance`) so near touches roll the ball forward instead
@@ -254,7 +257,9 @@ Stadium (Main.tscn)
 - Headless verify: `--headless --path game --script res/tools/verify_foot_ik.gd` (Stage 3
   IK + bones) and `--headless --path game --script res/tools/verify_dribble.gd`
   (deterministic Stage 5 carry test: drives player at jog into the ball, asserts DRIBBLING
-  reached and ball stays in front within `max_control_distance` for 10 simulated seconds).
+  reached and ball stays in front within `max_control_distance` for 10 simulated seconds,
+  then kicks the ball (pass) and asserts the player recaptures and carries it again —
+  guards the `_touch_cooldown` freeze that previously deadlocked post-kick recapture).
 
 ### Short 3D mown grass (`field/grass/` — port of karl/godot-grass)
 
