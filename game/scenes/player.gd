@@ -13,7 +13,7 @@ extends CharacterBody3D
 @export var foot_ray_length := 0.35
 @export var debug_physics := false
 
-const ANIM_IDLE := "Soccer_Idle"
+const ANIM_IDLE := "Offensive_Idle"
 const ANIM_JOG_FWD := "Jog_Fwd"
 const ANIM_JOG_BACK := "Jog_Back"
 const ANIM_DRIBBLE := "Dribble"
