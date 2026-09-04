@@ -21,7 +21,7 @@ enum State {
 
 @export_group("Control envelope")
 @export var control_distance := 0.9
-@export var max_control_distance := 1.25
+@export var max_control_distance := 1.8
 @export var control_height := 0.35
 @export var speed_factor := 0.15
 
@@ -29,6 +29,7 @@ enum State {
 @export var control_forward_distance := 0.65
 @export var control_side_distance := 0.20
 @export var control_height_offset := 0.11
+@export var close_forward_bias := 0.6
 @export var prediction_time := 0.10
 
 @export_group("Touch physics")
@@ -207,7 +208,13 @@ func _compute_touch_direction() -> Vector3:
 	var to_desired := _desired_ball_pos - _ball.global_position
 	to_desired.y = 0.0
 	if to_desired.length_squared() > 0.001:
-		return to_desired.normalized()
+		var dir := to_desired.normalized()
+		var player_forward := _player.global_transform.basis.z
+		player_forward.y = 0.0
+		if player_forward.length_squared() > 0.0001:
+			player_forward = player_forward.normalized()
+		var close_bias: float = clampf(1.0 - get_ball_distance() / control_distance, 0.0, 1.0)
+		return dir.lerp(player_forward, close_bias * close_forward_bias).normalized()
 	return _player.global_transform.basis.z
 
 
@@ -224,6 +231,9 @@ func _select_foot() -> void:
 	if _ball == null:
 		return
 	var local_ball := _player.to_local(_ball.global_position)
+	if _previous_foot != Foot.NONE and absf(local_ball.x) < 0.08:
+		_active_foot = _previous_foot
+		return
 	var side_foot := Foot.LEFT if local_ball.x < 0.0 else Foot.RIGHT
 	var dist_to_ball := get_ball_distance()
 	var reach := _reach_weight()
@@ -239,7 +249,8 @@ func _can_touch() -> bool:
 	if _touch_cooldown > 0.0:
 		return false
 	var dist := get_ball_distance()
-	if dist > control_distance:
+	var effective_control := control_distance + _player.velocity.length() * speed_factor
+	if dist > effective_control:
 		return false
 	if _ball.global_position.y - _player.global_position.y > control_height:
 		return false

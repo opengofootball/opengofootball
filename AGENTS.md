@@ -190,10 +190,14 @@ Stadium (Main.tscn)
   (`_ball_within_angle()`) prevents acting on balls behind the player, relaxed within 0.8 m.
 - **Dynamic foot selection** (`Foot` enum): `to_local(ball.global_position).x < 0 → LEFT`,
   else `RIGHT`. Considers previous foot and reachability; falls back to previous foot when
-  ball is outside reach. Exposed via `get_active_foot()` (returns `"left"` / `"right"`).
-- **Control envelope**: `control_distance` (0.9 m) scales with speed (`speed_factor` 0.15);
-  `max_control_distance` (1.25 m) triggers release; `control_height` (0.35 m) caps ball
-  height for control.
+  ball is outside reach (or when the ball is nearly centered, |local.x| < 0.08, to avoid a
+  hard-RIGHT bias on a straight approach). Exposed via `get_active_foot()` (returns
+  `"left"` / `"right"`).
+- **Control envelope**: `control_distance` (0.9 m) scales with speed (`speed_factor` 0.15),
+  and `_can_touch()` uses that same velocity-scaled radius so touches can START while
+  running (capture on approach at jog ≈ 1.4 m). `max_control_distance` (1.8 m, ≥ the
+  sprint capture radius) triggers release; `control_height` (0.35 m) caps ball height for
+  control.
 - **Ball target prediction**: `_compute_predicted_ball_position()` = `ball.position +
   ball.velocity × prediction_time` (0.10 s). IK targets and contact points use the
   predicted position, not the raw ball position.
@@ -204,10 +208,12 @@ Stadium (Main.tscn)
   `ball.apply_touch(impulse)` with `impulse = (desired_delta_v × ball_mass ×
   touch_control_factor)`. Touches fire at `touch_interval` (0.20 s) while in CONTROLLED or
   DRIBBLING state. Ball physics remains authoritative between touches.
-- **Touch direction/strength**: Direction = toward desired ball position (or player forward
-  if aligned). Strength = lerp(`min_touch_speed`, `max_touch_speed`, f(speed, distance_err))
-  + `player_velocity × player_velocity_influence`. `touch_control_factor` (0.6) scales the
-  velocity correction impulse.
+- **Touch direction/strength**: Direction = toward desired ball position, blended toward
+  player forward as the ball approaches the feet (`close_forward_bias` 0.6, scaled by
+  `close_bias = 1 − dist/control_distance`) so near touches roll the ball forward instead
+  of squirting it sideways. Strength = lerp(`min_touch_speed`, `max_touch_speed`,
+  f(speed, distance_err)) + `player_velocity × player_velocity_influence`.
+  `touch_control_factor` (0.6) scales the velocity correction impulse.
 - **Ball release**: Triggered when distance > `max_control_distance`, ball height >
   `control_height`, or ball exits frontal detection angle.
 - **Ball IK** (`foot_ik.gd`): `set_ball_ik(active, foot, target, influence)` switches the
@@ -226,7 +232,8 @@ Stadium (Main.tscn)
   foot target (orange) and ball (cyan) for tuning; `football_interaction.gd`
   `debug_interactions` prints state/foot/distance/height/reach/detected.
   `debug_dribble_visuals` draws spheres at the desired ball position (yellow), predicted
-  ball position (green), and foot contact target (orange).
+  ball position (green), foot contact target (orange), and a green `PlayerForward` marker
+  1 m along +basis.z.
 - **Possession**: Logical flag only — `has_ball()` returns `true` in `CONTROLLED` or
   `DRIBBLING`. The ball remains a free-simulating `CharacterBody3D`.
 - **Pass** (`Q`): Impulse in player forward direction at `pass_power` (8.0).
@@ -241,9 +248,13 @@ Stadium (Main.tscn)
 - **Ball asset**: Loafbrr CC0 football — `game/ball/visual/Balls.glb` mesh +
   `Football_Ball.tres` (text StandardMaterial3D referencing local 1k textures).
 - **Collision layers**: Player = 1, Ball = 2, Ground = 1. Player↔Ball collision
-  exceptions are set so the capsule and ball don't physically block each other.
-- Headless verify: `--headless --path game --script res/tools/verify_foot_ik.gd` (still
-  validates Stage 3 IK + bones).
+  exceptions are set so the capsule and ball don't physically block each other. The
+  `BallContact` Area3D (`player.tscn`) has `collision_layer=4`, `collision_mask=2` so
+  `player.gd ball_in_reach()`/`get_ball_contact()` see the ball.
+- Headless verify: `--headless --path game --script res/tools/verify_foot_ik.gd` (Stage 3
+  IK + bones) and `--headless --path game --script res/tools/verify_dribble.gd`
+  (deterministic Stage 5 carry test: drives player at jog into the ball, asserts DRIBBLING
+  reached and ball stays in front within `max_control_distance` for 10 simulated seconds).
 
 ### Short 3D mown grass (`field/grass/` — port of karl/godot-grass)
 
