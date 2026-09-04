@@ -1,0 +1,51 @@
+[gd_scene load_steps=8 format=3 uid="uid://opengofootball_m1_main"]
+
+[ext_resource type="Script" path="res://scenes/orbit_camera.gd" id="1_cam"]
+[ext_resource type="PackedScene" path="res://scenes/default_stadium.tscn" id="2_stad"]
+[ext_resource type="PackedScene" path="res://scenes/player.tscn" id="3_player"]
+[ext_resource type="PackedScene" path="res://ball/ball.tscn" id="4_ball"]
+
+[sub_resource type="ProceduralSkyMaterial" id="SkyMat_m1"]
+sky_top_color = Color(0.28, 0.5, 0.82, 1)
+sky_horizon_color = Color(0.74, 0.82, 0.9, 1)
+ground_bottom_color = Color(0.14, 0.18, 0.1, 1)
+ground_horizon_color = Color(0.5, 0.58, 0.4, 1)
+sun_angle_max = 30.0
+
+[sub_resource type="Sky" id="Sky_m1"]
+sky_material = SubResource("SkyMat_m1")
+
+[sub_resource type="Environment" id="Environment_m1"]
+background_mode = 2
+sky = SubResource("Sky_m1")
+ambient_light_source = 3
+ambient_light_color = Color(0.82, 0.86, 0.9, 1)
+ambient_light_sky_contribution = 0.75
+tonemap_mode = 3
+ssao_enabled = false
+ssao_radius = 1.6
+ssao_intensity = 1.35
+glow_enabled = true
+glow_intensity = 0.22
+glow_bloom = 0.04
+
+[node name="Main" type="Node3D"]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_m1")
+
+[node name="Sun" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.866025, -0.353553, 0.353553, 0, 0.707107, 0.707107, -0.5, -0.612372, 0.612372, 20, 50, 20)
+light_energy = 1.35
+shadow_enabled = true
+directional_shadow_max_distance = 400.0
+
+[node name="Camera3D" type="Camera3D" parent="."]
+script = ExtResource("1_cam")
+
+[node name="Stadium" parent="." instance=ExtResource("2_stad")]
+
+[node name="Player" parent="." instance=ExtResource("3_player")]
+
+[node name="Ball" parent="." instance=ExtResource("4_ball")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.11, 3)

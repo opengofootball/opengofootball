@@ -1,0 +1,19 @@
+[gd_scene load_steps=3 format=3 uid="uid://opengofootball_ball"]
+
+[ext_resource type="Script" path="res://ball/ball.gd" id="1_ball"]
+[ext_resource type="PackedScene" path="res://ball/football_visual.tscn" id="2_visual"]
+
+[sub_resource type="SphereShape3D" id="BallShape_m1"]
+radius = 0.11
+
+[node name="Ball" type="CharacterBody3D"]
+collision_layer = 2
+collision_mask = 1
+script = ExtResource("1_ball")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.11, 0)
+shape = SubResource("BallShape_m1")
+
+[node name="FootballVisual" parent="." instance=ExtResource("2_visual")]
+transform = Transform3D(0.785714, 0, 0, 0, 0.785714, 0, 0, 0, 0.785714, 0, 0.11, 0)

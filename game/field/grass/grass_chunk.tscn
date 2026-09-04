@@ -1,0 +1,81 @@
+[gd_scene load_steps=13 format=3]
+
+[ext_resource type="Script" path="res://field/grass/grass_chunk.gd" id="1_chunk"]
+[ext_resource type="Shader" path="res://field/grass/grass.gdshader" id="2_grass"]
+[ext_resource type="Shader" path="res://field/grass/impostor_grass.gdshader" id="3_imp"]
+[ext_resource type="Script" path="res://field/grass/grass.gd" id="4_gr"]
+[ext_resource type="Texture2D" path="res://field/grass/grass_normals.png" id="5_nrm"]
+[ext_resource type="MultiMesh" path="res://field/grass/grass_multimesh_detailed.tres" id="6_det"]
+
+[sub_resource type="FastNoiseLite" id="FastNoiseLite_mottle"]
+noise_type = 0
+
+[sub_resource type="NoiseTexture2D" id="NoiseTexture2D_mottle"]
+seamless = true
+noise = SubResource("FastNoiseLite_mottle")
+
+[sub_resource type="FastNoiseLite" id="FastNoiseLite_highfreq"]
+frequency = 0.1
+
+[sub_resource type="NoiseTexture2D" id="NoiseTexture2D_highfreq"]
+seamless_blend_skirt = 0.0
+noise = SubResource("FastNoiseLite_highfreq")
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_ground"]
+albedo_color = Color(0.0, 0.0, 0.0, 1)
+
+[sub_resource type="PlaneMesh" id="PlaneMesh_ground"]
+size = Vector2(5, 5)
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_grass"]
+render_priority = 0
+shader = ExtResource("2_grass")
+shader_parameter/size_small = 0.12
+shader_parameter/size_large = 0.22
+shader_parameter/blade_bend = 0.15
+shader_parameter/color_small = Color(0.24, 0.42, 0.16, 1)
+shader_parameter/color_large = Color(0.36, 0.52, 0.18, 1)
+shader_parameter/patch_noise = SubResource("NoiseTexture2D_mottle")
+shader_parameter/patch_scale = 4.0
+shader_parameter/mow_height = 0.5
+shader_parameter/object_radius = 1.2
+shader_parameter/object_position = Vector3(100000, 100000, 100000)
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_impostor"]
+render_priority = 0
+shader = ExtResource("3_imp")
+shader_parameter/color_small = Color(0.24, 0.42, 0.16, 1)
+shader_parameter/color_large = Color(0.36, 0.52, 0.18, 1)
+shader_parameter/ground_color = Color(0.0, 0.0, 0.0, 1)
+shader_parameter/patch_noise = SubResource("NoiseTexture2D_mottle")
+shader_parameter/patch_scale = 4.0
+shader_parameter/high_frequency_noise = SubResource("NoiseTexture2D_highfreq")
+shader_parameter/baked_normals = ExtResource("5_nrm")
+
+[sub_resource type="PlaneMesh" id="PlaneMesh_imp"]
+size = Vector2(5, 5)
+
+[node name="GrassChunk" type="Node3D"]
+script = ExtResource("1_chunk")
+lod_switch = 10.0
+impostor_fade_in_start = 5.0
+impostor_fade_in_end = 10.0
+grass_fade_out_start = 10.0
+grass_fade_out_end = 20.0
+
+[node name="Ground" type="MeshInstance3D" parent="."]
+material_override = SubResource("StandardMaterial3D_ground")
+mesh = SubResource("PlaneMesh_ground")
+
+[node name="Grass" type="MultiMeshInstance3D" parent="."]
+material_override = SubResource("ShaderMaterial_grass")
+cast_shadow = 0
+instance_shader_parameters/alpha = 1.0
+multimesh = ExtResource("6_det")
+script = ExtResource("4_gr")
+
+[node name="Impostor" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.01, 0)
+material_override = SubResource("ShaderMaterial_impostor")
+instance_shader_parameters/alpha = 0.0
+mesh = SubResource("PlaneMesh_imp")

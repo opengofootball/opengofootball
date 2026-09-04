@@ -176,30 +176,48 @@ Stadium (Main.tscn)
   an independent `CharacterBody3D` on collision layer 2. It is **never** reparented.
 - **State machine** (`football_interaction.gd`): `NONE → APPROACH → CONTROL → DRIBBLE`.
   `PASS` and `SHOOT` are transient states that fire an impulse then return to `APPROACH`.
-- **Ball detection**: `BallDetector` `Area3D` on the ball (layer 2) detected by
-  `FootballInteraction`. Tunables: `detection_distance` (2.0 m), `max_ball_height` (0.5 m),
-  `control_distance` (1.0 m). Facing-direction dot check prevents detecting balls behind
-  the player (relaxed within 0.8 m).
+- **Ball detection**: `FootballInteraction` reads the ball reference directly (no
+  `BallDetector` area; detection is fully parametric). Tunables for the "in reach" gate:
+  `detection_distance` (2.0 m), `detection_angle_deg` (90° — frontal cone in player-local
+  space), `max_ball_height` (0.5 m), `control_distance` (1.0 m). The player-local cone
+  filter (`_ball_within_angle()`) prevents acting on balls behind the player, relaxed
+  within 0.8 m.
 - **Dynamic foot selection**: `to_local(ball.global_position).x < 0 → left foot`, else
   right. Selection happens on entering `CONTROL`. Exposed via `get_active_foot()`.
-- **Ball IK** (`foot_ik.gd`): `set_ball_ik(active, foot, target)` switches the active
-  foot's `TwoBoneIK3D` target from ground raycast to ball contact point. The other foot
-  keeps ground IK. Influence is `0.5` (same as ground). Ball IK is active during
+- **Ball IK** (`foot_ik.gd`): `set_ball_ik(active, foot, target, influence)` switches the
+  active foot's `TwoBoneIK3D` target from ground raycast to ball contact point. The other
+  foot keeps ground IK. Influence is `0.5` (same as ground). Ball IK is active during
   `CONTROL` and `DRIBBLE`, off otherwise.
+- **Reach weighting**: `max_foot_reach` (1.3 m) + `reach_fade` (0.25 m) drive a smooth
+  curve so BallIK influence → 0 beyond leg reach (prevents leg overextension). The active
+  foot's `TwoBoneIK3D.influence` = `influence × reach_weight`.
+- **Smooth IK blend**: `foot_ik.gd` ramps `_ball_ik_influence` with `move_toward`
+  (`_ball_ik_blend_speed`), so BallIK eases in/out instead of snapping. Ground foot
+  influence is restored on deactivation.
+- **Ball orientation**: `_orient_foot_basis()` turns the active foot target toward the
+  ball so the foot naturally faces its approach direction.
+- **Debug visuals**: `foot_ik.gd` `debug_visuals := false` draws unshaded spheres at the
+  foot target (orange) and ball (cyan) for tuning; `football_interaction.gd`
+  `debug_interactions` prints state/foot/distance/height/reach/detected.
 - **Possession**: Logical flag only — `has_ball()` returns `true` in `CONTROL` or
   `DRIBBLE`. The ball remains a free-simulating `CharacterBody3D`.
-- **Dribble**: Discrete touches every `dribble_touch_interval` (0.4 s). Each touch
-  computes a target position at `dribble_forward_offset` + `dribble_side_offset` from the
-  player and pushes the ball toward it via `BallSimulation.apply_touch()`.
+- **Dribble**: Continuous velocity steering in `_update_dribble()`. Each physics frame
+  sets `ball.velocity = player.velocity + spring_correction` toward a target at
+  `dribble_forward_offset` (0.6) + `dribble_side_offset` (0.15) from the player, so the
+  ball rides in front during `DRIBBLE`.
 - **Pass** (`Q`): Impulse in player forward direction at `pass_power` (8.0).
 - **Shoot** (`F`): Impulse at `shoot_power` (18.0) with `shoot_elevation` (0.8 m/s).
 - **Ball physics** (`ball.gd`): Manual gravity, ground friction, air drag, bounce
   (coefficient 0.5). `apply_touch(impulse)` and `apply_shot(direction, power, elevation)`
   are the gameplay API. Ball mass 0.43 kg (FIFA size 5).
+- **Kick animation**: `pass`/`shoot` gate on `_ball_in_control_range()` and call
+  `player.play_kick("Kick_Soccerball")` (0.5 s `_kick_anim_timer`).
 - **Input**: `Q` = pass, `F` = shoot. Player turn speed reduced during ball control
   (`control_turn_speed`).
-- **Ball asset**: Loafbrr CC0 football (`game/ball/visual/` + `Balls.glb`).
-- **Collision layers**: Player = 1, Ball = 2, Ground = 1. BallDetector masks layer 2.
+- **Ball asset**: Loafbrr CC0 football — `game/ball/visual/Balls.glb` mesh +
+  `Football_Ball.tres` (text StandardMaterial3D referencing local 1k textures).
+- **Collision layers**: Player = 1, Ball = 2, Ground = 1. Player↔Ball collision
+  exceptions are set so the capsule and ball don't physically block each other.
 - Headless verify: `--headless --path game --script res/tools/verify_foot_ik.gd` (still
   validates Stage 3 IK + bones).
 
